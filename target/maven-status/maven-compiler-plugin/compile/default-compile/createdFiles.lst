@@ -1,0 +1,7 @@
+rs/raf/farmakologija/App.class
+rs/raf/farmakologija/db/DatabaseConnection.class
+rs/raf/farmakologija/ui/SignupFrame.class
+rs/raf/farmakologija/auth/UserStore.class
+rs/raf/farmakologija/ui/LoginFrame.class
+rs/raf/farmakologija/auth/PasswordHasher.class
+rs/raf/farmakologija/ui/AdminMainFrame.class
