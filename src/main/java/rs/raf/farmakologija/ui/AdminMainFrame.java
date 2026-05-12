@@ -1,11 +1,16 @@
 package rs.raf.farmakologija.ui;
 
+import rs.raf.farmakologija.auth.UserStore;
+import rs.raf.farmakologija.db.DatabaseConnection;
+import rs.raf.farmakologija.ui.panels.BrisanjeLaboratorijePanel;
+import rs.raf.farmakologija.ui.panels.IzmenaSesijePanel;
+import rs.raf.farmakologija.ui.panels.PregledSesijaPanel;
+import rs.raf.farmakologija.ui.panels.SamostalniUpitPanel;
+
 import javax.swing.*;
 import java.awt.*;
 import java.sql.Connection;
 import java.sql.SQLException;
-
-import rs.raf.farmakologija.db.DatabaseConnection;
 
 public class AdminMainFrame extends JFrame {
 
@@ -19,14 +24,14 @@ public class AdminMainFrame extends JFrame {
 
     private void buildUi() {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(900, 600);
+        setSize(1000, 650);
         setLocationRelativeTo(null);
 
         JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("Pregled sesija", placeholder("Forma za pregled zakazanih sesija i eksperimenata."));
-        tabs.addTab("Izmena sesije", placeholder("Forma za promenu podataka o sesiji."));
-        tabs.addTab("Brisanje laboratorije", placeholder("Forma za brisanje laboratorije (samo ako u njoj ne radi nijedan istraživač)."));
-        tabs.addTab("Samostalni upit", placeholder("Tvoj samostalni upit nad farmakološkom specifikacijom."));
+        tabs.addTab("Pregled sesija", new PregledSesijaPanel());
+        tabs.addTab("Izmena sesije", new IzmenaSesijePanel());
+        tabs.addTab("Brisanje laboratorije", new BrisanjeLaboratorijePanel());
+        tabs.addTab("Samostalni upit", new SamostalniUpitPanel());
 
         JLabel status = new JLabel("Prijavljen kao: " + username + "  |  " + connectionStatus());
         status.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
@@ -45,22 +50,16 @@ public class AdminMainFrame extends JFrame {
         getContentPane().add(tabs, BorderLayout.CENTER);
     }
 
-    private JComponent placeholder(String text) {
-        JLabel lbl = new JLabel("<html><div style='padding:30px;color:#666'>TODO: " + text + "</div></html>");
-        lbl.setHorizontalAlignment(SwingConstants.CENTER);
-        return lbl;
-    }
-
     private String connectionStatus() {
         try (Connection c = DatabaseConnection.get()) {
             return "DB: OK";
         } catch (SQLException e) {
-            return "DB: nepovezano (" + e.getMessage() + ")";
+            return "DB: nepovezano";
         }
     }
 
     private void logout() {
-        new LoginFrame(new rs.raf.farmakologija.auth.UserStore()).setVisible(true);
+        new LoginFrame(new UserStore()).setVisible(true);
         dispose();
     }
 }

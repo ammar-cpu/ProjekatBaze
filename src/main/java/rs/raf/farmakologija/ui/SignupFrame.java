@@ -64,29 +64,24 @@ public class SignupFrame extends JFrame {
         String confirm = new String(confirmField.getPassword());
 
         if (username.isEmpty() || password.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Polja ne smeju biti prazna.",
-                    "Greška", JOptionPane.WARNING_MESSAGE);
+            UiUtil.showWarn(this, "Polja ne smeju biti prazna.");
             return;
         }
         if (!password.equals(confirm)) {
-            JOptionPane.showMessageDialog(this, "Lozinke se ne poklapaju.",
-                    "Greška", JOptionPane.WARNING_MESSAGE);
+            UiUtil.showWarn(this, "Lozinke se ne poklapaju.");
             return;
         }
         if (userStore.exists(username)) {
-            JOptionPane.showMessageDialog(this, "Korisničko ime je već zauzeto.",
-                    "Greška", JOptionPane.ERROR_MESSAGE);
+            UiUtil.showWarn(this, "Korisničko ime je već zauzeto.");
             return;
         }
 
         try {
             userStore.register(username, password);
-            JOptionPane.showMessageDialog(this, "Uspešna registracija. Možete se prijaviti.",
-                    "Info", JOptionPane.INFORMATION_MESSAGE);
+            UiUtil.showInfo(this, "Uspešna registracija. Možete se prijaviti.");
             backToLogin();
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "Greška pri upisu: " + ex.getMessage(),
-                    "Greška", JOptionPane.ERROR_MESSAGE);
+            UiUtil.showError(this, "Greška pri upisu", ex);
         }
     }
 

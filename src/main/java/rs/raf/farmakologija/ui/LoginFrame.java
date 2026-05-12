@@ -59,8 +59,7 @@ public class LoginFrame extends JFrame {
         String password = new String(passwordField.getPassword());
 
         if (username.isEmpty() || password.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Unesite korisničko ime i lozinku.",
-                    "Greška", JOptionPane.WARNING_MESSAGE);
+            UiUtil.showWarn(this, "Unesite korisničko ime i lozinku.");
             return;
         }
 
