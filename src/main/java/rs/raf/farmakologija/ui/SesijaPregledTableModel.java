@@ -9,8 +9,8 @@ import java.util.List;
 public class SesijaPregledTableModel extends AbstractTableModel {
 
     private static final String[] COLUMNS = {
-            "ID", "Datum", "Početak", "Kraj", "Status",
-            "Eksperiment", "Laboratorija"
+            "ID", "Datum", "Početak", "Kraj", "Status sesije",
+            "Eksperiment", "Laboratorija", "Status izvođenja"
     };
 
     private List<SesijaPregled> data = new ArrayList<>();
@@ -20,9 +20,7 @@ public class SesijaPregledTableModel extends AbstractTableModel {
         fireTableDataChanged();
     }
 
-    public SesijaPregled getAt(int row) {
-        return data.get(row);
-    }
+    public SesijaPregled getAt(int row) { return data.get(row); }
 
     @Override public int getRowCount()    { return data.size(); }
     @Override public int getColumnCount() { return COLUMNS.length; }
@@ -36,9 +34,10 @@ public class SesijaPregledTableModel extends AbstractTableModel {
             case 1 -> s.datum();
             case 2 -> s.pocetak();
             case 3 -> s.zavrsetak();
-            case 4 -> s.status();
-            case 5 -> s.eksperimentNaziv();
-            case 6 -> s.labNaziv();
+            case 4 -> s.statusSesije();
+            case 5 -> s.eksperiment();
+            case 6 -> s.laboratorija();
+            case 7 -> s.statusIzvodjenja();
             default -> null;
         };
     }

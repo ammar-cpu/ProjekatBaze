@@ -9,6 +9,7 @@ import java.util.List;
 
 public class LaboratorijaDao {
 
+    // Neparametrizovan upit — koristi Statement (spec zahtev)
     public List<Laboratorija> findAll() throws SQLException {
         String sql = "SELECT lab_id, naziv, zgrada, sprat, br_prostorije FROM laboratorija ORDER BY naziv";
         try (Connection c = DatabaseConnection.get();
@@ -28,12 +29,19 @@ public class LaboratorijaDao {
         }
     }
 
-    public int delete(int labId) throws SQLException {
-        String sql = "DELETE FROM laboratorija WHERE lab_id = ?";
+    // Poziva koleginicinu proceduru obrisi_laboratoriju koja interno proverava
+    // da li u laboratoriji rade istrazivaci i izvrsava brisanje u transakciji.
+    // Vraca poruku procedure ('Laboratorija uspesno obrisana' ili opis greske).
+    public String delete(int labId) throws SQLException {
+        String sql = "CALL obrisi_laboratoriju(?)";
         try (Connection c = DatabaseConnection.get();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setInt(1, labId);
-            return ps.executeUpdate();
+            ps.execute();
+            try (ResultSet rs = ps.getResultSet()) {
+                if (rs != null && rs.next()) return rs.getString("poruka");
+            }
+            return "OK";
         }
     }
 }

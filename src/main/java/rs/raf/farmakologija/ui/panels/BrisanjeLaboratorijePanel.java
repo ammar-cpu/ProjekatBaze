@@ -11,8 +11,8 @@ import java.sql.SQLException;
 
 public class BrisanjeLaboratorijePanel extends JPanel {
 
-    private final LaboratorijaDao labDao = new LaboratorijaDao();
-    private final IstrazivacDao istrazivacDao = new IstrazivacDao();
+    private final LaboratorijaDao labDao       = new LaboratorijaDao();
+    private final IstrazivacDao   istrazivacDao = new IstrazivacDao();
 
     private final JComboBox<Laboratorija> labBox = new JComboBox<>();
 
@@ -21,8 +21,8 @@ public class BrisanjeLaboratorijePanel extends JPanel {
 
         labBox.setRenderer(new DefaultListCellRenderer() {
             @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                          boolean isSelected, boolean cellHasFocus) {
+            public Component getListCellRendererComponent(JList<?> list, Object value,
+                    int index, boolean isSelected, boolean cellHasFocus) {
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
                 if (value instanceof Laboratorija l) {
                     setText("#" + l.labId() + " — " + l.naziv());
@@ -42,11 +42,12 @@ public class BrisanjeLaboratorijePanel extends JPanel {
         c.gridx = 1; c.fill = GridBagConstraints.HORIZONTAL;
         form.add(labBox, c);
 
-        JLabel info = new JLabel("<html><i>Brisanje je dozvoljeno samo ako u laboratoriji ne radi nijedan istraživač.</i></html>");
+        JLabel info = new JLabel(
+            "<html><i>Brisanje je dozvoljeno samo ako u laboratoriji ne radi nijedan istraživač.</i></html>");
         info.setForeground(Color.GRAY);
 
         JButton refreshBtn = new JButton("Osveži");
-        JButton deleteBtn = new JButton("Obriši");
+        JButton deleteBtn  = new JButton("Obriši");
         refreshBtn.addActionListener(e -> refresh(true));
         deleteBtn.addActionListener(e -> delete());
 
@@ -56,7 +57,6 @@ public class BrisanjeLaboratorijePanel extends JPanel {
 
         c.gridx = 0; c.gridy = 1; c.gridwidth = 2; c.fill = GridBagConstraints.HORIZONTAL;
         form.add(info, c);
-
         c.gridy = 2;
         form.add(buttons, c);
 
@@ -67,9 +67,7 @@ public class BrisanjeLaboratorijePanel extends JPanel {
     private void refresh(boolean showErrors) {
         try {
             labBox.removeAllItems();
-            for (Laboratorija l : labDao.findAll()) {
-                labBox.addItem(l);
-            }
+            for (Laboratorija l : labDao.findAll()) labBox.addItem(l);
         } catch (SQLException ex) {
             if (showErrors) UiUtil.showError(this, "Greška pri učitavanju laboratorija", ex);
         }
@@ -77,30 +75,28 @@ public class BrisanjeLaboratorijePanel extends JPanel {
 
     private void delete() {
         Laboratorija selected = (Laboratorija) labBox.getSelectedItem();
-        if (selected == null) {
-            UiUtil.showWarn(this, "Izaberite laboratoriju.");
-            return;
-        }
+        if (selected == null) { UiUtil.showWarn(this, "Izaberite laboratoriju."); return; }
+
         try {
+            // Brza provera pre poziva procedure — PreparedStatement SELECT
             int broj = istrazivacDao.countByLab(selected.labId());
             if (broj > 0) {
-                UiUtil.showWarn(this,
-                        "Brisanje odbijeno: u laboratoriji '" + selected.naziv()
-                                + "' radi " + broj + " istraživača.");
+                UiUtil.showWarn(this, "Brisanje odbijeno: u laboratoriji '"
+                        + selected.naziv() + "' radi " + broj + " istraživača.");
                 return;
             }
 
-            if (!UiUtil.confirm(this, "Sigurno obrisati laboratoriju '" + selected.naziv() + "'?")) {
-                return;
-            }
+            if (!UiUtil.confirm(this, "Sigurno obrisati laboratoriju '" + selected.naziv() + "'?")) return;
 
-            int affected = labDao.delete(selected.labId());
-            if (affected == 1) {
-                UiUtil.showInfo(this, "Laboratorija obrisana.");
+            // Poziv procedure obrisi_laboratoriju — transakcija + interni check
+            String poruka = labDao.delete(selected.labId());
+            if (poruka != null && poruka.toLowerCase().contains("uspesno")) {
+                UiUtil.showInfo(this, poruka);
                 refresh(true);
             } else {
-                UiUtil.showWarn(this, "Laboratorija nije pronađena.");
+                UiUtil.showWarn(this, poruka != null ? poruka : "Nepoznata greška.");
             }
+
         } catch (SQLException ex) {
             UiUtil.showError(this, "Greška pri brisanju", ex);
         }

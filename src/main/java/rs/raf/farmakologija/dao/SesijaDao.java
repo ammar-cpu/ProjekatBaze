@@ -12,23 +12,11 @@ import java.util.List;
 
 public class SesijaDao {
 
+    // Neparametrizovan upit — koristi Statement (spec zahtev)
     public List<SesijaPregled> findAllForPregled() throws SQLException {
-        String sql = """
-                SELECT s.sesija_id, s.datum, s.pocetak, s.zavrsetak,
-                       s.status_sesije AS status,
-                       iz.izvodjenje_id, iz.datum AS izvodjenje_datum,
-                       e.naziv AS eksperiment_naziv,
-                       l.naziv AS lab_naziv
-                FROM sesija s
-                JOIN izvodjenje iz
-                       ON s.izvodjenje_id = iz.izvodjenje_id
-                      AND s.lab_id        = iz.lab_id
-                JOIN eksperiment e
-                       ON iz.eks_id = e.eks_id
-                JOIN laboratorija l
-                       ON s.lab_id = l.lab_id
-                ORDER BY s.datum, s.pocetak
-                """;
+        String sql = "SELECT sesija_id, datum, pocetak, zavrsetak, status_sesije, " +
+                "laboratorija, eksperiment, datum_izvodjenja, status_izvodjenja " +
+                "FROM pregled_sesija ORDER BY datum, pocetak";
         try (Connection c = DatabaseConnection.get();
              Statement st = c.createStatement();
              ResultSet rs = st.executeQuery(sql)) {
@@ -39,17 +27,18 @@ public class SesijaDao {
                         rs.getDate("datum").toLocalDate(),
                         rs.getTime("pocetak").toLocalTime(),
                         rs.getTime("zavrsetak").toLocalTime(),
-                        rs.getString("status"),
-                        rs.getInt("izvodjenje_id"),
-                        rs.getDate("izvodjenje_datum").toLocalDate(),
-                        rs.getString("eksperiment_naziv"),
-                        rs.getString("lab_naziv")
+                        rs.getString("status_sesije"),
+                        rs.getString("laboratorija"),
+                        rs.getString("eksperiment"),
+                        rs.getDate("datum_izvodjenja").toLocalDate(),
+                        rs.getString("status_izvodjenja")
                 ));
             }
             return result;
         }
     }
 
+    // Parametrizovan upit — koristi PreparedStatement (spec zahtev)
     public Sesija findById(int sesijaId) throws SQLException {
         String sql = "SELECT sesija_id, datum, pocetak, zavrsetak, status_sesije AS status, " +
                 "izvodjenje_id, lab_id FROM sesija WHERE sesija_id = ?";
@@ -73,18 +62,23 @@ public class SesijaDao {
         }
     }
 
-    public int update(int sesijaId, LocalDate datum, LocalTime pocetak,
-                      LocalTime zavrsetak, String status) throws SQLException {
-        String sql = "UPDATE sesija SET datum = ?, pocetak = ?, zavrsetak = ?, status_sesije = ? " +
-                "WHERE sesija_id = ?";
+    // Poziva koleginicinu proceduru izmeni_sesiju koja proverava
+    // preklapanje termina i izvrsava izmenu unutar transakcije.
+    // Vraca poruku procedure ('Sesija uspesno izmenjena' ili opis greske).
+    public String izmeni(int sesijaId, LocalDate datum,
+                         LocalTime pocetak, LocalTime zavrsetak) throws SQLException {
+        String sql = "CALL izmeni_sesiju(?, ?, ?, ?)";
         try (Connection c = DatabaseConnection.get();
              PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setDate(1, Date.valueOf(datum));
-            ps.setTime(2, Time.valueOf(pocetak));
-            ps.setTime(3, Time.valueOf(zavrsetak));
-            ps.setString(4, status);
-            ps.setInt(5, sesijaId);
-            return ps.executeUpdate();
+            ps.setInt(1, sesijaId);
+            ps.setDate(2, Date.valueOf(datum));
+            ps.setTime(3, Time.valueOf(pocetak));
+            ps.setTime(4, Time.valueOf(zavrsetak));
+            ps.execute();
+            try (ResultSet rs = ps.getResultSet()) {
+                if (rs != null && rs.next()) return rs.getString("poruka");
+            }
+            return "OK";
         }
     }
 }

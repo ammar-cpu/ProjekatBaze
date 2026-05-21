@@ -2389,6 +2389,377 @@ SELECT 'sesija', COUNT(*) FROM sesija UNION ALL
 SELECT 'ses_resurs', COUNT(*) FROM ses_resurs UNION ALL
 SELECT 'ses_alat', COUNT(*) FROM ses_alat;
 
+-- Pogled pregled_laboratorija prikazuje laboratorije sa broj eksperimenata
+-- koji su se u njima izvodili i brojem istrazivaca koji su ucestvovali.
+-- Uvodi se radi lakseg pracenja aktivnosti po laboratorijama,
+-- kako se ne bi svaki put pisao kompleksan JOIN upit.
+CREATE VIEW pregled_laboratorija AS
+SELECT
+	l.naziv AS laboratorija,
+    COUNT(DISTINCT izv.eks_id) AS broj_eksperimenata,
+    COUNT(DISTINCT u.izvodjac_id) AS broj_istrazivaca
+FROM laboratorija l
+JOIN izvodjenje izv ON l.lab_id = izv.lab_id
+JOIN uloga u ON izv.izvodjenje_id = u.izvodjenje_id
+			AND izv.lab_id = u.lab_id
+GROUP BY l.lab_id
+HAVING COUNT(DISTINCT izv.eks_id) > 10;
+
+-- select ne mora biti u istom fajlu kao create view, pozivam samo radi testiranja
+SELECT * FROM pregled_laboratorija;
+
+-- Pogled istrazivaci_klasifikacije prikazuje istrazivace sa ukupnim brojem
+-- specijalizacija i sertifikata koje poseduju.
+-- Uvodi se radu lakseg pregleda kvalifikovanosti istrazivaca
+-- kako se ne bi svaki put pisao slozeni JOIN upiti.
+CREATE VIEW istrazivaci_klasifikacije AS
+SELECT
+	i.ime,
+    i.prezime,
+    i.akademska_titula,
+    COUNT(DISTINCT isp.specijalizacija_id) AS broj_specijalizacija,
+    COUNT(DISTINCT ks.sertifikat_id) AS broj_sertifikata
+FROM istrazivac i
+JOIN konkretan_sertifikat ks ON i.istrazivac_id = ks.istrazivac_id
+JOIN istrazivac_specijalizacija isp ON i.istrazivac_id = isp.istrazivac_id
+GROUP BY i.istrazivac_id
+HAVING COUNT(DISTINCT ks.sertifikat_id) >= 1; 
+
+SELECT * FROM istrazivaci_klasifikacije;
+
+-- Pogled pregled_sesija prikazuje zakazane sesije zajedno sa detaljima
+-- izvođenja i eksperimenta koji se u njima izvršava.
+-- Uvodi se radi lakšeg pregleda rasporeda sesija u aplikaciji administratora
+-- bez potrebe da se svaki put pišu složeni JOIN upiti.
+-- GROUP BY i HAVING su uvedeni radi ispunjenja tehničkih zahteva projekta,
+-- grupisanjem po sesija_id obezbeđujemo jedinstvenost redova u rezultatu.
+CREATE VIEW pregled_sesija AS
+SELECT
+	s.sesija_id,
+    s.datum,
+    s.pocetak,
+    s.zavrsetak,
+    s.status_sesije,
+    l.naziv AS laboratorija,
+    e.naziv AS eksperiment,
+    i.datum AS datum_izvodjenja,
+    si.opis AS status_izvodjenja
+FROM sesija s
+JOIN izvodjenje i ON s.izvodjenje_id = i.izvodjenje_id AND s.lab_id = i.lab_id
+JOIN laboratorija l ON s.lab_id = l.lab_id
+JOIN eksperiment e ON i.eks_id = e.eks_id
+JOIN status_izvodjenja si ON i.status_id = si.status_id
+GROUP BY s.sesija_id
+HAVING COUNT(s.sesija_id) >= 1;
+
+SELECT * FROM pregled_sesija;
+
+
+DELIMITER $$
+
+-- Procedura zakazi_sesiju zakazuje novu sesiju u laboratoriji.
+-- Proverava tri uslova: preklapanje termina u laboratoriji,
+-- dostupnost potrebnih resursa i pripadnost alata laboratoriji.
+-- Ako su svi uslovi zadovoljeni, kreira sesiju sa statusom 'zakazana'.
+-- Ako ijedan uslov nije zadovoljen, transakcija se poništava (ROLLBACK)
+-- i sesija se ne kreira.
+CREATE PROCEDURE zakazi_sesiju(
+	IN p_datum DATE,
+    IN p_pocetak TIME,
+    IN p_zavrsetak TIME,
+    IN p_izvodjenje_id INT,
+    IN p_lab_id INT,
+    IN p_resurs_id INT,
+    IN p_potrosena_kol DECIMAL(10,2),
+    IN p_alat_id INT    
+)
+BEGIN
+	DECLARE v_preklapanje INT;
+    DECLARE v_dostupna_kol DECIMAL(10,2);
+    DECLARE v_alat_u_lab INT;
+    
+    -- proveravamo preklapanje termina - brojimo sesije koje se vremenski poklapaju sa trazenim terminom u istoj lab
+    SELECT COUNT(*) INTO v_preklapanje
+    FROM sesija
+    WHERE lab_id = p_lab_id
+    AND datum = p_datum
+    AND (
+		(p_pocetak >= pocetak AND p_pocetak < zavrsetak)
+        OR (p_zavrsetak > pocetak AND p_zavrsetak <= zavrsetak)
+        OR (p_pocetak <= pocetak AND p_zavrsetak >= zavrsetak)
+    );
+    
+    -- proveravamo dostupnu kolicinu resursa
+    SELECT kolicina INTO v_dostupna_kol
+    FROM lab_resurs
+    WHERE lab_id = p_lab_id AND resurs_id = p_resurs_id;
+    
+    -- proveravamo da li alat pripada laboratoriji
+    SELECT COUNT(*) INTO v_alat_u_lab
+    FROM alat
+    WHERE alat_id = p_alat_id AND lab_id = p_lab_id;
+    
+    START TRANSACTION;
+    
+    IF v_preklapanje > 0 THEN
+		ROLLBACK;
+        SELECT 'Laboratorija nije dostupna u trazenom terminu' AS poruka;
+	ELSEIF v_dostupna_kol < p_potrosena_kol THEN
+		ROLLBACK;
+        SELECT 'Nema dovoljno resursa u laboratoriji' AS poruka;
+	ELSEIF v_alat_u_lab = 0 THEN
+		ROLLBACK;
+        SELECT 'Alat ne pripada ovoj laboratoriji' AS poruka;
+	ELSE
+		-- kreiramo sesiju
+        INSERT INTO sesija (datum, pocetak, zavrsetak, status_sesije, izvodjenje_id, lab_id)
+        VALUES (p_datum, p_pocetak, p_zavrsetak, 'zakazana', p_izvodjenje_id, p_lab_id);
+        
+        COMMIT;
+        SELECT 'Sesija uspesno zakazana' AS poruka;
+	END IF;
+END $$
+		
+DELIMITER ;
+
+-- testiranje procedure - uspesno zakazivanje
+-- CALL zakazi_sesiju(
+-- '2025-01-15',  -- datum
+-- '09:00:00',    -- pocetak
+-- '13:00:00',    -- zavrsetak
+-- 1,             -- izvodjenje_id
+-- 1,             -- lab_id
+-- 4,             -- resurs_id (cisplatin)
+-- 10.00,         -- potrosena_kol
+-- 1              -- alat_id
+-- );
+-- SELECT * FROM sesija WHERE datum = '2025-01-15';
+
+-- testiranje procedure - neuspesni slucajevi
+-- CALL zakazi_sesiju('2025-01-15', '10:00:00', '12:00:00', 1, 1, 4, 10.00, 1);
+-- CALL zakazi_sesiju('2025-02-01', '09:00:00', '13:00:00', 1, 1, 4, 99999.00, 1);
+-- CALL zakazi_sesiju('2025-03-01', '09:00:00', '13:00:00', 1, 1, 4, 10.00, 10);
+
+DELIMITER $$
+
+-- Procedura zavrsi_sesiju se poziva po završetku sesije.
+-- Menja status sesije na 'zavrsena' i automatski azurira inventar
+-- laboratorije oduzimanjem potrosenih resursa od dostupnih kolicina.
+-- Ako nema dovoljno resursa, transakcija se ponistava (ROLLBACK).
+-- Uvodi se radi automatskog azuriranja inventara laboratorije
+-- po zavrsetku sesije kroz transakciju.
+CREATE PROCEDURE zavrsi_sesiju(
+	IN p_sesija_id INT,
+    IN p_resurs_id INT,
+    IN p_potrosena_kol DECIMAL(10,2)
+)
+BEGIN
+	DECLARE v_dostupna_kol DECIMAL(10,2);
+    DECLARE v_lab_id INT;
+    
+    -- pronalazimo lab_id sesije
+    SELECT lab_id INTO v_lab_id
+    FROM sesija
+    WHERE sesija_id = p_sesija_id;
+    
+    -- proveravamo dostupnu kolicinu resursa
+    SELECT kolicina INTO v_dostupna_kol
+    FROM lab_resurs
+    WHERE lab_id = v_lab_id AND resurs_id = p_resurs_id;
+    
+    START TRANSACTION;
+    
+    IF v_dostupna_kol < p_potrosena_kol THEN
+		ROLLBACK;
+        SELECT 'Nema dovoljno resursa u laboratoriji' AS poruka;
+	ELSE
+		-- menjamo status sesije na zavrsena
+        UPDATE sesija
+        SET status_sesije = 'zavrsena'
+        WHERE sesija_id = p_sesija_id;
+        
+        -- azuriramo inventar laboratorije
+        UPDATE lab_resurs
+        SET kolicina = kolicina - p_potrosena_kol
+        WHERE lab_id = v_lab_id AND resurs_id = p_resurs_id;
+        
+        COMMIT;
+        SELECT 'Sesija uspesno zavrsena i inventar azuriran' AS poruka;
+	END IF;
+END $$
+
+DELIMITER ;
+
+-- testiranje zavrsi_sesiju
+-- SELECT sesija_id, datum, status_sesije FROM sesija WHERE datum = '2025-01-15';
+-- CALL zavrsi_sesiju(102, 4, 5.00);
+-- SELECT kolicina FROM lab_resurs WHERE lab_id = 1 AND resurs_id = 4;
+
+DELIMITER $$
+
+-- Procedura izmeni_sesiju menja podatke o određenoj zakazanoj sesiji.
+-- Prima sesija_id i nove vrednosti za datum, vreme početka i završetka.
+-- Proverava da li se nova sesija preklapa sa već zakazanim sesijama
+-- u istoj laboratoriji pre nego što izvrši izmenu.
+-- Uvodi se radi bezbedne izmene sesija uz proveru preklapanja termina.
+CREATE PROCEDURE izmeni_sesiju(
+	IN p_sesija_id INT,
+    IN p_novi_datum DATE,
+    IN p_novi_pocetak TIME,
+    IN p_novi_zavrsetak TIME
+)
+BEGIN
+	DECLARE v_lab_id INT;
+    DECLARE v_preklapanje INT;
+    
+    -- pronalazimo lab_id sesije
+    SELECT lab_id INTO v_lab_id
+    FROM sesija
+    WHERE sesija_id = p_sesija_id;
+    
+    -- proveravamo preklapanje sa drugim sesija (iskljucujemo trenutnu)
+    SELECT COUNT(*) INTO v_preklapanje
+    FROM sesija
+    WHERE lab_id = v_lab_id
+    AND datum = p_novi_datum
+    AND sesija_id != p_sesija_id
+    AND (
+		(p_novi_pocetak >= pocetak AND p_novi_pocetak < zavrsetak)
+        OR (p_novi_zavrsetak > pocetak AND p_novi_zavrsetak <= zavrsetak)
+        OR (p_novi_pocetak <= pocetak AND p_novi_zavrsetak >= zavrsetak)
+    );
+    
+    START TRANSACTION;
+    
+    IF v_preklapanje > 0 THEN
+		ROLLBACK;
+        SELECT 'Laboratorija nije dostupna u novom terminu' AS poruka;
+	ELSE
+		UPDATE sesija
+        SET datum = p_novi_datum,
+			pocetak = p_novi_pocetak,
+            zavrsetak = p_novi_zavrsetak
+		WHERE sesija_id = p_sesija_id;
+        
+        COMMIT;
+        SELECT 'Sesija uspesno izmenjena' AS poruka;
+	END IF;
+END $$
+
+DELIMITER ;
+
+DELIMITER $$
+
+-- Procedura obrisi_laboratoriju brise laboratoriju iz baze.
+-- Dozvoljeno je samo ukoliko u toj laboratoriji ne radi nijedan istrazivac.
+-- Uvodi se radi bezbednog brisanja laboratorija uz proveru
+-- da li je laboratorija trenutno aktivna.
+CREATE PROCEDURE obrisi_laboratoriju(
+	IN p_lab_id INT
+)
+BEGIN
+	DECLARE v_broj_istrazivaca INT;
+    
+    -- proveravamo da li u laboratoriji radi neki istrazivac
+    SELECT COUNT(*) INTO v_broj_istrazivaca
+    FROM istrazivac
+    WHERE lab_id = p_lab_id;
+    
+    START TRANSACTION;
+    
+    IF v_broj_istrazivaca > 0 THEN
+		ROLLBACK;
+        SELECT 'Nije moguce obrisati laboratoriju jer u njoj rade istrazivaci' AS poruka;
+	ELSE
+		DELETE FROM laboratorija
+        WHERE lab_id = p_lab_id;
+        
+        COMMIT;
+        SELECT 'Laboratorija uspesno obrisana' AS poruka;
+	END IF;
+END $$
+
+DELIMITER ;
+
+
+
+DELIMITER $$
+
+-- Funkcija broj_istrazivaca_u_lab prima lab_id i vraca ukupan broj
+-- istrazivaca koji rade u toj laboratoriji.
+-- Uvodi se radi lakseg dobijanja broja istrazivaca po laboratoriji
+-- bez potrebe da se svaki put pise JOIN upit.
+CREATE FUNCTION broj_istrazivaca_u_lab(p_lab_id INT)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+	DECLARE v_broj int;
+    
+    SELECT COUNT(*) INTO V_broj
+    FROM istrazivac
+    WHERE lab_id = p_lab_id;
+    
+    RETURN v_broj;
+END $$
+
+DELIMITER ;
+
+-- testiranje da li prolazi fja - SELECT broj_istrazivaca_u_lab(1) AS br_istrazivaca_u_lab1;
+
+DELIMITER $$
+
+-- Test funkcija testira funkciju broj_istrazivaca_u_lab za 5 razlicitih
+-- vrednosti lab_id i vraca TRUE ako su svi rezultati ispravni,
+-- a FALSE ako ijedan rezultat nije ispravan.
+CREATE FUNCTION test_broj_istrazivaca_u_lab()
+RETURNS BOOLEAN
+DETERMINISTIC
+BEGIN
+	DECLARE v_rezultat BOOLEAN DEFAULT TRUE;
+    
+    -- Test 1: lab_id = 1, ocekujemo vise od 0 istrazivaca
+    IF broj_istrazivaca_u_lab(1) <= 0 THEN
+		SET v_rezultat = FALSE;
+	END IF;
+    
+    -- Test 2: lab_id = 2, ocekujemo vise od 0 istrazivaca
+    IF broj_istrazivaca_u_lab(2) <= 0 THEN
+		SET v_rezultat = FALSE;
+	END IF;
+    
+    -- Test 3: lab_id = 3, ocekujemo vise od 0 istrazivaca
+    IF broj_istrazivaca_u_lab(3) <= 0 THEN
+		SET v_rezultat = FALSE;
+	END IF;
+    
+    -- Test 4: lab_id = 4, ocekujemo vise od 0 istrazivaca
+    IF broj_istrazivaca_u_lab(4) <= 0 THEN
+		SET v_rezultat = FALSE;
+	END IF;
+    
+    -- Test 5: lab_id = 999, ocekujemo 0 istrazivaca (ne postoji)
+    IF broj_istrazivaca_u_lab(999) != 0 THEN
+		SET v_rezultat = FALSE;
+	END IF;
+    
+    RETURN v_rezultat;
+END $$
+
+DELIMITER ;
+
+SELECT test_broj_istrazivaca_u_lab() AS rezultat_testa;
+
+
+
+
+
+
+
+
+
+  
+
+
 
 
 

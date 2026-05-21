@@ -13,26 +13,24 @@ import java.time.format.DateTimeParseException;
 
 public class IzmenaSesijePanel extends JPanel {
 
-    private static final String[] STATUSI = {"zakazana", "u toku", "završena", "otkazana"};
-
     private final SesijaDao dao = new SesijaDao();
 
     private final JComboBox<SesijaPregled> sesijaBox = new JComboBox<>();
-    private final JTextField datumField = new JTextField(12);
-    private final JTextField pocetakField = new JTextField(8);
+    private final JTextField datumField    = new JTextField(12);
+    private final JTextField pocetakField  = new JTextField(8);
     private final JTextField zavrsetakField = new JTextField(8);
-    private final JComboBox<String> statusBox = new JComboBox<>(STATUSI);
 
     public IzmenaSesijePanel() {
         setLayout(new BorderLayout());
 
         sesijaBox.setRenderer(new DefaultListCellRenderer() {
             @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                          boolean isSelected, boolean cellHasFocus) {
+            public Component getListCellRendererComponent(JList<?> list, Object value,
+                    int index, boolean isSelected, boolean cellHasFocus) {
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
                 if (value instanceof SesijaPregled s) {
-                    setText("#" + s.sesijaId() + " — " + s.eksperimentNaziv() + " (" + s.datum() + ")");
+                    setText("#" + s.sesijaId() + " — " + s.eksperiment()
+                            + " (" + s.datum() + " " + s.pocetak() + ")");
                 }
                 return this;
             }
@@ -52,23 +50,25 @@ public class IzmenaSesijePanel extends JPanel {
 
         c.gridwidth = 1; c.fill = GridBagConstraints.NONE;
         c.gridx = 0; c.gridy = 1;
-        form.add(new JLabel("Datum (YYYY-MM-DD):"), c);
+        form.add(new JLabel("Novi datum (YYYY-MM-DD):"), c);
         c.gridx = 1; form.add(datumField, c);
 
         c.gridx = 0; c.gridy = 2;
-        form.add(new JLabel("Početak (HH:mm):"), c);
+        form.add(new JLabel("Novi početak (HH:mm):"), c);
         c.gridx = 1; form.add(pocetakField, c);
 
         c.gridx = 0; c.gridy = 3;
-        form.add(new JLabel("Završetak (HH:mm):"), c);
+        form.add(new JLabel("Novi završetak (HH:mm):"), c);
         c.gridx = 1; form.add(zavrsetakField, c);
 
-        c.gridx = 0; c.gridy = 4;
-        form.add(new JLabel("Status:"), c);
-        c.gridx = 1; form.add(statusBox, c);
+        JLabel info = new JLabel(
+            "<html><i>Procedura automatski proverava preklapanje termina u laboratoriji.</i></html>");
+        info.setForeground(Color.GRAY);
+        c.gridx = 0; c.gridy = 4; c.gridwidth = 2;
+        form.add(info, c);
 
         JButton refreshBtn = new JButton("Osveži listu");
-        JButton saveBtn = new JButton("Sačuvaj izmene");
+        JButton saveBtn    = new JButton("Sačuvaj izmene");
         refreshBtn.addActionListener(e -> refresh(true));
         saveBtn.addActionListener(e -> save());
 
@@ -100,37 +100,35 @@ public class IzmenaSesijePanel extends JPanel {
         datumField.setText(s.datum().toString());
         pocetakField.setText(s.pocetak().toString());
         zavrsetakField.setText(s.zavrsetak().toString());
-        statusBox.setSelectedItem(s.status());
     }
 
     private void save() {
         SesijaPregled selected = (SesijaPregled) sesijaBox.getSelectedItem();
-        if (selected == null) {
-            UiUtil.showWarn(this, "Izaberite sesiju.");
-            return;
-        }
+        if (selected == null) { UiUtil.showWarn(this, "Izaberite sesiju."); return; }
+
         try {
-            LocalDate datum = LocalDate.parse(datumField.getText().trim());
-            LocalTime pocetak = LocalTime.parse(pocetakField.getText().trim());
-            LocalTime zavrsetak = LocalTime.parse(zavrsetakField.getText().trim());
-            String status = (String) statusBox.getSelectedItem();
+            LocalDate  datum     = LocalDate.parse(datumField.getText().trim());
+            LocalTime  pocetak   = LocalTime.parse(pocetakField.getText().trim());
+            LocalTime  zavrsetak = LocalTime.parse(zavrsetakField.getText().trim());
 
             if (!zavrsetak.isAfter(pocetak)) {
                 UiUtil.showWarn(this, "Završetak mora biti posle početka.");
                 return;
             }
 
-            int affected = dao.update(selected.sesijaId(), datum, pocetak, zavrsetak, status);
-            if (affected == 1) {
-                UiUtil.showInfo(this, "Sesija ažurirana.");
+            String poruka = dao.izmeni(selected.sesijaId(), datum, pocetak, zavrsetak);
+
+            if (poruka != null && poruka.toLowerCase().contains("uspesno")) {
+                UiUtil.showInfo(this, poruka);
                 refresh(true);
             } else {
-                UiUtil.showWarn(this, "Sesija nije pronađena (možda je obrisana).");
+                UiUtil.showWarn(this, poruka != null ? poruka : "Nepoznata greška.");
             }
+
         } catch (DateTimeParseException ex) {
-            UiUtil.showWarn(this, "Neispravan format datuma ili vremena.");
+            UiUtil.showWarn(this, "Neispravan format datuma ili vremena. Koristite YYYY-MM-DD i HH:mm.");
         } catch (SQLException ex) {
-            UiUtil.showError(this, "Greška pri ažuriranju", ex);
+            UiUtil.showError(this, "Greška pri izmeni", ex);
         }
     }
 }
