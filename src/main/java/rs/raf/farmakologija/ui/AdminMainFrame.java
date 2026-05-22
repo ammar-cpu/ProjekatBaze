@@ -1,11 +1,9 @@
 package rs.raf.farmakologija.ui;
 
 import rs.raf.farmakologija.auth.UserStore;
+import rs.raf.farmakologija.dao.LaboratorijaDao;
 import rs.raf.farmakologija.db.DatabaseConnection;
-import rs.raf.farmakologija.ui.panels.BrisanjeLaboratorijePanel;
-import rs.raf.farmakologija.ui.panels.IzmenaSesijePanel;
-import rs.raf.farmakologija.ui.panels.PregledSesijaPanel;
-import rs.raf.farmakologija.ui.panels.SamostalniUpitPanel;
+import rs.raf.farmakologija.ui.panels.*;
 
 import javax.swing.*;
 import java.awt.*;
@@ -27,10 +25,17 @@ public class AdminMainFrame extends JFrame {
         setSize(1000, 650);
         setLocationRelativeTo(null);
 
+        LaboratorijaDao labDao = new LaboratorijaDao();
+
+        BrisanjeLaboratorijePanel brisanjePanel = new BrisanjeLaboratorijePanel(labDao);
+        DodajLaboratorijuPanel dodajPanel = new DodajLaboratorijuPanel(labDao);
+        dodajPanel.setOnLabAdded(brisanjePanel::refresh);
+
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Pregled sesija", new PregledSesijaPanel());
         tabs.addTab("Izmena sesije", new IzmenaSesijePanel());
-        tabs.addTab("Brisanje laboratorije", new BrisanjeLaboratorijePanel());
+        tabs.addTab("Brisanje laboratorije", brisanjePanel);
+        tabs.addTab("Dodaj laboratoriju", dodajPanel);
         tabs.addTab("Samostalni upit", new SamostalniUpitPanel());
 
         JLabel status = new JLabel("Prijavljen kao: " + username + "  |  " + connectionStatus());

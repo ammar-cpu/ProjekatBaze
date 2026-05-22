@@ -2595,27 +2595,44 @@ DELIMITER ;
 -- CALL zavrsi_sesiju(102, 4, 5.00);
 -- SELECT kolicina FROM lab_resurs WHERE lab_id = 1 AND resurs_id = 4;
 
+
+
 DELIMITER $$
 
 -- Procedura izmeni_sesiju menja podatke o određenoj zakazanoj sesiji.
--- Prima sesija_id i nove vrednosti za datum, vreme početka i završetka.
--- Proverava da li se nova sesija preklapa sa već zakazanim sesijama
--- u istoj laboratoriji pre nego što izvrši izmenu.
--- Uvodi se radi bezbedne izmene sesija uz proveru preklapanja termina.
+-- Prima sesija_id, nove vrednosti za datum, vreme i status sesije.
+-- Proverava preklapanje termina, a status izvođenja se automatski
+-- ažurira na osnovu novog statusa sesije.
+-- Uvodi se radi bezbedne izmene sesija uz automatsku sinhronizaciju
+-- statusa sesije i izvođenja.
 CREATE PROCEDURE izmeni_sesiju(
 	IN p_sesija_id INT,
     IN p_novi_datum DATE,
     IN p_novi_pocetak TIME,
-    IN p_novi_zavrsetak TIME
+    IN p_novi_zavrsetak TIME,
+    IN p_novi_status VARCHAR(50)
 )
 BEGIN
 	DECLARE v_lab_id INT;
     DECLARE v_preklapanje INT;
+    DECLARE v_izvodjenje_id INT;
+    DECLARE v_novi_status_izvodjenja VARCHAR(50);
     
     -- pronalazimo lab_id sesije
-    SELECT lab_id INTO v_lab_id
+    SELECT lab_id, izvodjenje_id INTO v_lab_id, v_izvodjenje_id
     FROM sesija
     WHERE sesija_id = p_sesija_id;
+    
+    -- automatski postavljamo status izvodjenja na osnovu statusa sesije
+    IF p_novi_status = 'zakazana' THEN
+        SET v_novi_status_izvodjenja = 'planirano';
+    ELSEIF p_novi_status = 'u toku' THEN
+        SET v_novi_status_izvodjenja = 'zapoceto';
+    ELSEIF p_novi_status = 'zavrsena' THEN
+        SET v_novi_status_izvodjenja = 'zavrseno uspesno';
+    ELSEIF p_novi_status = 'otkazana' THEN
+        SET v_novi_status_izvodjenja = 'otkazano';
+    END IF;
     
     -- proveravamo preklapanje sa drugim sesija (iskljucujemo trenutnu)
     SELECT COUNT(*) INTO v_preklapanje
@@ -2638,8 +2655,18 @@ BEGIN
 		UPDATE sesija
         SET datum = p_novi_datum,
 			pocetak = p_novi_pocetak,
-            zavrsetak = p_novi_zavrsetak
+            zavrsetak = p_novi_zavrsetak,
+            status_sesije = p_novi_status
 		WHERE sesija_id = p_sesija_id;
+        
+        -- automatski menjamo status izvodjenja na osnovu statusa sesije
+        UPDATE izvodjenje
+        SET status_id = (
+            SELECT status_id FROM status_izvodjenja 
+            WHERE opis = v_novi_status_izvodjenja
+        )
+        WHERE izvodjenje_id = v_izvodjenje_id
+        AND lab_id = v_lab_id;
         
         COMMIT;
         SELECT 'Sesija uspesno izmenjena' AS poruka;
@@ -2748,6 +2775,50 @@ END $$
 DELIMITER ;
 
 SELECT test_broj_istrazivaca_u_lab() AS rezultat_testa;
+
+DELIMITER $$
+
+-- Procedura dodaj_laboratoriju dodaje novu laboratoriju u bazu.
+-- Proverava da li laboratorija sa istim nazivom vec postoji.
+-- Ako postoji, transakcija se ponistava (ROLLBACK).
+-- Ako ne postoji, nova laboratorija se dodaje u bazu (INSERT).
+-- Uvodi se radi bezbednog dodavanja laboratorija uz proveru duplikata.
+
+CREATE PROCEDURE dodaj_laboratoriju(
+	IN p_naziv VARCHAR(100),
+    IN p_zgrada VARCHAR(100),
+    IN p_sprat INT,
+    IN p_br_prostorije VARCHAR(20),
+    IN p_biosafety_id INT
+)
+BEGIN
+	DECLARE v_postojeca INT;
+    
+    -- proveravamo da li laboratorija sa istim nazivom vec postoji
+    SELECT COUNT(*) INTO v_postojeca
+    FROM laboratorija
+    WHERE naziv = p_naziv;
+    
+    START TRANSACTION;
+    
+    IF v_postojeca > 0 THEN
+		ROLLBACK;
+        SELECT 'Laboratorija sa tim nazivom vec postoji' AS poruka;
+	ELSE
+		INSERT INTO laboratorija (naziv, zgrada, sprat, br_prostorije, biosafety_id)
+        VALUES (p_naziv, p_zgrada, p_sprat, p_br_prostorije, p_biosafety_id);
+        
+        COMMIT;
+        SELECT 'Laboratorija uspesno dodata' AS poruka;
+	END IF;
+END $$
+
+DELIMITER ;
+-- test 1: uspesno dodavanje nove laboratorije
+-- CALL dodaj_laboratoriju('Laboratorija za neurobiologiju', 'Zgrada D', 2, '201', 2);
+-- test 2: neuspesno dodavanje laboratorije (vec postoji)
+-- CALL dodaj_laboratoriju('Vivarijum', 'Zgrada C', 1, '001', 1);
+
 
 
 
